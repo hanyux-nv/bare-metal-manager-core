@@ -295,19 +295,29 @@ func (cdesh CreateDpuExtensionServiceHandler) Handle(c echo.Context) error {
 		versionInfo := &cdbm.DpuExtensionServiceVersionInfo{}
 		versionInfo.FromProto(controllerDpuExtensionService.LatestVersionInfo, dpuExtensionService.Created)
 		status := cdbm.DpuExtensionServiceStatusReady
+		statusMessage := "DPU Extension Service is ready for deployment"
 
+		var lifecycleState *cdbm.DpuExtensionServiceLifecycleState
+		var coreState cdbm.DpuExtensionServiceLifecycleState
+		coreState.FromProto(controllerDpuExtensionService.LifecycleStatus)
+		if coreState != "" {
+			lifecycleState = &coreState
+			status = coreState.Status()
+			statusMessage = fmt.Sprintf("Core accepted DPF Helm chart service in %s state", coreState)
+		}
 		updatedDpuExtensionService, err = desDAO.Update(ctx, nil, cdbm.DpuExtensionServiceUpdateInput{
 			DpuExtensionServiceID: dpuExtensionService.ID,
 			Version:               &version,
 			VersionInfo:           versionInfo,
 			ActiveVersions:        activeVersions,
 			Status:                &status,
+			LifecycleState:        lifecycleState,
 		})
 		if err != nil {
 			logger.Error().Err(err).Msg("error updating DPU Extension Service record in DB")
 			// Don't fail the request, the service will get updated on next inventory sync
 		} else {
-			statusDetail, serr := sdDAO.Create(ctx, nil, cdbm.StatusDetailCreateInput{EntityID: dpuExtensionService.ID.String(), Status: cdbm.DpuExtensionServiceStatusReady, Message: cutil.GetPtr("DPU Extension Service is ready for deployment")})
+			statusDetail, serr := sdDAO.Create(ctx, nil, cdbm.StatusDetailCreateInput{EntityID: dpuExtensionService.ID.String(), Status: status, Message: &statusMessage})
 			if serr != nil {
 				logger.Error().Err(serr).Msg("error creating Status Detail DB entry")
 			} else if statusDetail == nil {
@@ -753,6 +763,22 @@ func (udesh UpdateDpuExtensionServiceHandler) Handle(c echo.Context) error {
 		return cutil.NewAPIErrorResponse(c, http.StatusForbidden, "DPU Extension Service does not belong to current Tenant", nil)
 	}
 
+	// The request does not carry the service type, so the stored service decides
+	// which data format applies.
+	if apiRequest.Data != nil {
+		var verr error
+		switch dpuExtensionService.ServiceType {
+		case cdbm.DpuExtensionServiceServiceTypeKubernetesPod:
+			verr = model.ValidatePodYaml([]byte(*apiRequest.Data))
+		case cdbm.DpuExtensionServiceServiceTypeDpfHelmChart:
+			verr = model.ValidateDpfHelmChartData([]byte(*apiRequest.Data))
+		}
+		if verr != nil {
+			logger.Warn().Err(verr).Msg("invalid DPU Extension Service data in update request")
+			return cutil.NewAPIErrorResponse(c, http.StatusBadRequest, "Error validating DPU Extension Service update request data", verr)
+		}
+	}
+
 	// Check if name is being updated and if it's unique
 	if apiRequest.Name != nil && *apiRequest.Name != dpuExtensionService.Name {
 		existingServices, _, err := desDAO.GetAll(
@@ -893,12 +919,20 @@ func (udesh UpdateDpuExtensionServiceHandler) Handle(c echo.Context) error {
 		versionInfo.FromProto(controllerDpuExtensionService.LatestVersionInfo, updatedDpuExtensionService.Updated)
 		status := cdbm.DpuExtensionServiceStatusReady
 
+		var lifecycleState *cdbm.DpuExtensionServiceLifecycleState
+		var coreState cdbm.DpuExtensionServiceLifecycleState
+		coreState.FromProto(controllerDpuExtensionService.LifecycleStatus)
+		if coreState != "" {
+			lifecycleState = &coreState
+			status = coreState.Status()
+		}
 		reUpdatedDpuExtensionService, err = desDAO.Update(ctx, nil, cdbm.DpuExtensionServiceUpdateInput{
 			DpuExtensionServiceID: dpuExtensionService.ID,
 			Version:               &version,
 			VersionInfo:           versionInfo,
 			ActiveVersions:        activeVersions,
 			Status:                &status,
+			LifecycleState:        lifecycleState,
 		})
 
 		if err != nil {
@@ -945,7 +979,8 @@ func NewDeleteDpuExtensionServiceHandler(dbSession *cdb.Session, tc tclient.Clie
 // @Security ApiKeyAuth
 // @Param org path string true "Name of NGC organization"
 // @Param dpuExtensionServiceId path string true "ID of DPU Extension Service"
-// @Success 204 "No Content"
+// @Success 202 "DPF Helm chart deletion accepted"
+// @Success 204 "Kubernetes Pod service deleted"
 // @Router /v2/org/{org}/nico/dpu-extension-service/{dpuExtensionServiceId} [delete]
 func (ddesh DeleteDpuExtensionServiceHandler) Handle(c echo.Context) error {
 	org, dbUser, ctx, logger, handlerSpan := common.SetupHandler("Delete", "DpuExtensionService", c, ddesh.tracerSpan)
@@ -1023,6 +1058,10 @@ func (ddesh DeleteDpuExtensionServiceHandler) Handle(c echo.Context) error {
 		return cutil.NewAPIErrorResponse(c, http.StatusBadRequest, "Cannot delete DPU Extension Service with active deployments", nil)
 	}
 
+	// Core tears a DPF Helm chart down asynchronously, so the row stays behind in
+	// Deleting until inventory reports the service is gone.
+	isDpfHelmChart := dpuExtensionService.ServiceType == cdbm.DpuExtensionServiceServiceTypeDpfHelmChart
+
 	// timeoutResp lets the closure signal a post-rollback handler — the
 	// TerminateWorkflow call has to run after the closure returns so that
 	// the DB tx unwinds before we make the second remote call. nil means
@@ -1031,24 +1070,26 @@ func (ddesh DeleteDpuExtensionServiceHandler) Handle(c echo.Context) error {
 
 	err = cdb.WithTx(ctx, ddesh.dbSession, func(tx *cdb.Tx) error {
 		// Update status to Deleting
-		_, derr := desDAO.Update(
-			ctx,
-			tx,
-			cdbm.DpuExtensionServiceUpdateInput{
-				DpuExtensionServiceID: dpuExtensionService.ID,
-				Status:                cutil.GetPtr(cdbm.DpuExtensionServiceStatusDeleting),
-			},
-		)
+		updateInput := cdbm.DpuExtensionServiceUpdateInput{
+			DpuExtensionServiceID: dpuExtensionService.ID,
+			Status:                cutil.GetPtr(cdbm.DpuExtensionServiceStatusDeleting),
+		}
+		if isDpfHelmChart {
+			updateInput.LifecycleState = cutil.GetPtr(cdbm.DpuExtensionServiceLifecycleStateDeleting)
+		}
+		_, derr := desDAO.Update(ctx, tx, updateInput)
 		if derr != nil {
 			logger.Error().Err(derr).Msg("unable to update DPU Extension Service status to Deleting")
 			return cutil.NewAPIError(http.StatusInternalServerError, "Failed to update DPU Extension Service status to Deleting, DB error", nil)
 		}
 
 		// Delete the DPU Extension Service
-		derr = desDAO.Delete(ctx, tx, dpuExtensionService.ID)
-		if derr != nil {
-			logger.Error().Err(derr).Msg("unable to delete DPU Extension Service")
-			return cutil.NewAPIError(http.StatusInternalServerError, "Failed to delete DPU Extension Service, DB error", nil)
+		if !isDpfHelmChart {
+			derr = desDAO.Delete(ctx, tx, dpuExtensionService.ID)
+			if derr != nil {
+				logger.Error().Err(derr).Msg("unable to delete DPU Extension Service")
+				return cutil.NewAPIError(http.StatusInternalServerError, "Failed to delete DPU Extension Service, DB error", nil)
+			}
 		}
 
 		// Trigger workflow to delete DPU Extension Service
@@ -1121,6 +1162,10 @@ func (ddesh DeleteDpuExtensionServiceHandler) Handle(c echo.Context) error {
 	}
 
 	logger.Info().Msg("finishing API handler")
+
+	if isDpfHelmChart {
+		return c.NoContent(http.StatusAccepted)
+	}
 
 	return c.NoContent(http.StatusNoContent)
 }

@@ -93,6 +93,75 @@ func TestDpuExtensionServiceVersionInfo_FromProto(t *testing.T) {
 	}
 }
 
+func TestDpuExtensionServiceLifecycleStateFromProto(t *testing.T) {
+	tests := []struct {
+		name              string
+		lifecycleStatus   *corev1.LifecycleStatus
+		expectedLifecycle DpuExtensionServiceLifecycleState
+		expectedStatus    string
+	}{
+		{
+			name:           "absent lifecycle leaves state empty",
+			expectedStatus: DpuExtensionServiceStatusPending,
+		},
+		{
+			name:            "undecodable lifecycle leaves state empty",
+			lifecycleStatus: &corev1.LifecycleStatus{State: "ready"},
+			expectedStatus:  DpuExtensionServiceStatusPending,
+		},
+		{
+			name:            "unrecognized lifecycle leaves state empty",
+			lifecycleStatus: &corev1.LifecycleStatus{State: `{"state":"unknown"}`},
+			expectedStatus:  DpuExtensionServiceStatusPending,
+		},
+		{
+			name:              "creating maps to pending",
+			lifecycleStatus:   &corev1.LifecycleStatus{State: `{"state":"creating"}`},
+			expectedLifecycle: DpuExtensionServiceLifecycleStateCreating,
+			expectedStatus:    DpuExtensionServiceStatusPending,
+		},
+		{
+			name:              "ready maps to ready",
+			lifecycleStatus:   &corev1.LifecycleStatus{State: `{"state":"ready"}`},
+			expectedLifecycle: DpuExtensionServiceLifecycleStateReady,
+			expectedStatus:    DpuExtensionServiceStatusReady,
+		},
+		{
+			name:              "updating maps to pending",
+			lifecycleStatus:   &corev1.LifecycleStatus{State: `{"state":"updating"}`},
+			expectedLifecycle: DpuExtensionServiceLifecycleStateUpdating,
+			expectedStatus:    DpuExtensionServiceStatusPending,
+		},
+		{
+			name:              "deleting maps to deleting",
+			lifecycleStatus:   &corev1.LifecycleStatus{State: `{"state":"deleting"}`},
+			expectedLifecycle: DpuExtensionServiceLifecycleStateDeleting,
+			expectedStatus:    DpuExtensionServiceStatusDeleting,
+		},
+		{
+			name:              "deleted maps to deleted",
+			lifecycleStatus:   &corev1.LifecycleStatus{State: `{"state":"deleted"}`},
+			expectedLifecycle: DpuExtensionServiceLifecycleStateDeleted,
+			expectedStatus:    DpuExtensionServiceStatusDeleted,
+		},
+		{
+			name:              "failed maps to error",
+			lifecycleStatus:   &corev1.LifecycleStatus{State: `{"state":"failed"}`},
+			expectedLifecycle: DpuExtensionServiceLifecycleStateFailed,
+			expectedStatus:    DpuExtensionServiceStatusError,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var lifecycleState DpuExtensionServiceLifecycleState
+			lifecycleState.FromProto(tc.lifecycleStatus)
+			assert.Equal(t, tc.expectedLifecycle, lifecycleState)
+			assert.Equal(t, tc.expectedStatus, lifecycleState.Status())
+		})
+	}
+}
+
 // reset the tables needed for DpuExtensionService tests
 func testDpuExtensionServiceSetupSchema(t *testing.T, dbSession *db.Session) {
 	// create User table
