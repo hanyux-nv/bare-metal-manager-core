@@ -43,6 +43,10 @@ type DpuExtensionService struct {
 	ActiveVersions []string `json:"activeVersions,omitempty"`
 	// Status of the DPU Extension Service
 	Status *DpuExtensionServiceStatus `json:"status,omitempty"`
+	// Exact Core reconciliation state for a DPF Helm chart service; null for Kubernetes Pod services
+	LifecycleState NullableDpuExtensionServiceLifecycleState `json:"lifecycleState,omitempty"`
+	// Core optimistic-concurrency revision for a DPF Helm chart service; null when unsupported
+	VersionCounter NullableInt32 `json:"versionCounter,omitempty"`
 	// History of the DPU Extension Service statuses
 	StatusHistory []StatusDetail `json:"statusHistory,omitempty"`
 	// Date/time when the DPU Extension Service was created
@@ -410,6 +414,92 @@ func (o *DpuExtensionService) SetStatus(v DpuExtensionServiceStatus) {
 	o.Status = &v
 }
 
+// GetLifecycleState returns the LifecycleState field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *DpuExtensionService) GetLifecycleState() DpuExtensionServiceLifecycleState {
+	if o == nil || IsNil(o.LifecycleState.Get()) {
+		var ret DpuExtensionServiceLifecycleState
+		return ret
+	}
+	return *o.LifecycleState.Get()
+}
+
+// GetLifecycleStateOk returns a tuple with the LifecycleState field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *DpuExtensionService) GetLifecycleStateOk() (*DpuExtensionServiceLifecycleState, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return o.LifecycleState.Get(), o.LifecycleState.IsSet()
+}
+
+// HasLifecycleState returns a boolean if a field has been set.
+func (o *DpuExtensionService) HasLifecycleState() bool {
+	if o != nil && o.LifecycleState.IsSet() {
+		return true
+	}
+
+	return false
+}
+
+// SetLifecycleState gets a reference to the given NullableDpuExtensionServiceLifecycleState and assigns it to the LifecycleState field.
+func (o *DpuExtensionService) SetLifecycleState(v DpuExtensionServiceLifecycleState) {
+	o.LifecycleState.Set(&v)
+}
+
+// SetLifecycleStateNil sets the value for LifecycleState to be an explicit nil
+func (o *DpuExtensionService) SetLifecycleStateNil() {
+	o.LifecycleState.Set(nil)
+}
+
+// UnsetLifecycleState ensures that no value is present for LifecycleState, not even an explicit nil
+func (o *DpuExtensionService) UnsetLifecycleState() {
+	o.LifecycleState.Unset()
+}
+
+// GetVersionCounter returns the VersionCounter field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *DpuExtensionService) GetVersionCounter() int32 {
+	if o == nil || IsNil(o.VersionCounter.Get()) {
+		var ret int32
+		return ret
+	}
+	return *o.VersionCounter.Get()
+}
+
+// GetVersionCounterOk returns a tuple with the VersionCounter field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *DpuExtensionService) GetVersionCounterOk() (*int32, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return o.VersionCounter.Get(), o.VersionCounter.IsSet()
+}
+
+// HasVersionCounter returns a boolean if a field has been set.
+func (o *DpuExtensionService) HasVersionCounter() bool {
+	if o != nil && o.VersionCounter.IsSet() {
+		return true
+	}
+
+	return false
+}
+
+// SetVersionCounter gets a reference to the given NullableInt32 and assigns it to the VersionCounter field.
+func (o *DpuExtensionService) SetVersionCounter(v int32) {
+	o.VersionCounter.Set(&v)
+}
+
+// SetVersionCounterNil sets the value for VersionCounter to be an explicit nil
+func (o *DpuExtensionService) SetVersionCounterNil() {
+	o.VersionCounter.Set(nil)
+}
+
+// UnsetVersionCounter ensures that no value is present for VersionCounter, not even an explicit nil
+func (o *DpuExtensionService) UnsetVersionCounter() {
+	o.VersionCounter.Unset()
+}
+
 // GetStatusHistory returns the StatusHistory field value if set, zero value otherwise.
 func (o *DpuExtensionService) GetStatusHistory() []StatusDetail {
 	if o == nil || IsNil(o.StatusHistory) {
@@ -545,6 +635,12 @@ func (o DpuExtensionService) ToMap() (map[string]interface{}, error) {
 	}
 	if !IsNil(o.Status) {
 		toSerialize["status"] = o.Status
+	}
+	if o.LifecycleState.IsSet() {
+		toSerialize["lifecycleState"] = o.LifecycleState.Get()
+	}
+	if o.VersionCounter.IsSet() {
+		toSerialize["versionCounter"] = o.VersionCounter.Get()
 	}
 	if !IsNil(o.StatusHistory) {
 		toSerialize["statusHistory"] = o.StatusHistory

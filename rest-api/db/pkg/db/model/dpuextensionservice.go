@@ -6,6 +6,7 @@ package model
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -36,6 +37,8 @@ const (
 	DpuExtensionServiceStatusError = "Error"
 	// DpuExtensionServiceStatusDeleting indicates that the DpuExtensionService is being deleted
 	DpuExtensionServiceStatusDeleting = "Deleting"
+	// DpuExtensionServiceStatusDeleted indicates that the DpuExtensionService has been deleted on the Site
+	DpuExtensionServiceStatusDeleted = "Deleted"
 
 	// DpuExtensionServiceOrderByDefault default field to be used for ordering when none specified
 	DpuExtensionServiceOrderByDefault = "created"
@@ -48,6 +51,7 @@ var (
 		DpuExtensionServiceStatusReady:    true,
 		DpuExtensionServiceStatusError:    true,
 		DpuExtensionServiceStatusDeleting: true,
+		DpuExtensionServiceStatusDeleted:  true,
 	}
 
 	// DpuExtensionServiceOrderByFields is a list of valid order by fields for the DpuExtensionService model
@@ -61,12 +65,81 @@ var (
 
 	// DpuExtensionServiceServiceTypeKubernetesPod indicates an extension service running as a Kubernetes pod
 	DpuExtensionServiceServiceTypeKubernetesPod = "KubernetesPod"
+	// DpuExtensionServiceServiceTypeDpfHelmChart indicates an extension service managed as a DPF Helm chart
+	DpuExtensionServiceServiceTypeDpfHelmChart = "DpfHelmChart"
 
 	// DpuExtensionServiceServiceTypeMap is a map of valid service types for the DpuExtensionService model
 	DpuExtensionServiceServiceTypeMap = map[string]bool{
 		DpuExtensionServiceServiceTypeKubernetesPod: true,
+		DpuExtensionServiceServiceTypeDpfHelmChart:  true,
 	}
 )
+
+// DpuExtensionServiceLifecycleState is Core's exact durable DPF reconciliation state.
+type DpuExtensionServiceLifecycleState string
+
+const (
+	// DpuExtensionServiceLifecycleStateCreating indicates Core accepted create and is reconciling DPF.
+	DpuExtensionServiceLifecycleStateCreating DpuExtensionServiceLifecycleState = "Creating"
+	// DpuExtensionServiceLifecycleStateReady indicates Core reconciled the desired DPUService.
+	DpuExtensionServiceLifecycleStateReady DpuExtensionServiceLifecycleState = "Ready"
+	// DpuExtensionServiceLifecycleStateUpdating indicates Core accepted a stable-V1 update.
+	DpuExtensionServiceLifecycleStateUpdating DpuExtensionServiceLifecycleState = "Updating"
+	// DpuExtensionServiceLifecycleStateDeleting indicates Core accepted asynchronous deletion.
+	DpuExtensionServiceLifecycleStateDeleting DpuExtensionServiceLifecycleState = "Deleting"
+	// DpuExtensionServiceLifecycleStateDeleted indicates Core completed deletion.
+	DpuExtensionServiceLifecycleStateDeleted DpuExtensionServiceLifecycleState = "Deleted"
+	// DpuExtensionServiceLifecycleStateFailed indicates Core reconciliation failed.
+	DpuExtensionServiceLifecycleStateFailed DpuExtensionServiceLifecycleState = "Failed"
+)
+
+// FromProto decodes Core's lifecycle envelope, which carries the DPF state as a
+// JSON document rather than the proto enum. An unrecognized state leaves the
+// receiver empty.
+func (s *DpuExtensionServiceLifecycleState) FromProto(lifecycleStatus *corev1.LifecycleStatus) {
+	*s = ""
+	if lifecycleStatus == nil {
+		return
+	}
+
+	var envelope struct {
+		State string `json:"state"`
+	}
+	err := json.Unmarshal([]byte(lifecycleStatus.State), &envelope)
+	if err != nil {
+		return
+	}
+	switch envelope.State {
+	case "creating":
+		*s = DpuExtensionServiceLifecycleStateCreating
+	case "ready":
+		*s = DpuExtensionServiceLifecycleStateReady
+	case "updating":
+		*s = DpuExtensionServiceLifecycleStateUpdating
+	case "deleting":
+		*s = DpuExtensionServiceLifecycleStateDeleting
+	case "deleted":
+		*s = DpuExtensionServiceLifecycleStateDeleted
+	case "failed":
+		*s = DpuExtensionServiceLifecycleStateFailed
+	}
+}
+
+// Status maps the lifecycle state onto a DpuExtensionService status
+func (s DpuExtensionServiceLifecycleState) Status() string {
+	switch s {
+	case DpuExtensionServiceLifecycleStateReady:
+		return DpuExtensionServiceStatusReady
+	case DpuExtensionServiceLifecycleStateDeleting:
+		return DpuExtensionServiceStatusDeleting
+	case DpuExtensionServiceLifecycleStateDeleted:
+		return DpuExtensionServiceStatusDeleted
+	case DpuExtensionServiceLifecycleStateFailed:
+		return DpuExtensionServiceStatusError
+	default:
+		return DpuExtensionServiceStatusPending
+	}
+}
 
 // DpuExtensionServiceVersionInfo is a data structure to capture information for a specific DPU Extension Service version
 type DpuExtensionServiceVersionInfo struct {
@@ -138,23 +211,25 @@ func (vi *DpuExtensionServiceVersionInfo) FromProto(protoVersionInfo *corev1.Dpu
 type DpuExtensionService struct {
 	bun.BaseModel `bun:"table:dpu_extension_service,alias:des"`
 
-	ID              uuid.UUID                       `bun:"id,type:uuid,unique,pk"`
-	Name            string                          `bun:"name,notnull"`
-	Description     *string                         `bun:"description"`
-	ServiceType     string                          `bun:"service_type,notnull"`
-	SiteID          uuid.UUID                       `bun:"site_id,type:uuid,notnull,pk"`
-	Site            *Site                           `bun:"rel:belongs-to,join:site_id=id"`
-	TenantID        uuid.UUID                       `bun:"tenant_id,type:uuid,notnull"`
-	Tenant          *Tenant                         `bun:"rel:belongs-to,join:tenant_id=id"`
-	Version         *string                         `bun:"version"`
-	VersionInfo     *DpuExtensionServiceVersionInfo `bun:"version_info,type:jsonb"`
-	ActiveVersions  []string                        `bun:"active_versions,type:text[],default:'{}'"`
-	Status          string                          `bun:"status,notnull"`
-	IsMissingOnSite bool                            `bun:"is_missing_on_site,notnull,default:false"`
-	Created         time.Time                       `bun:"created,nullzero,notnull,default:current_timestamp"`
-	Updated         time.Time                       `bun:"updated,nullzero,notnull,default:current_timestamp"`
-	Deleted         *time.Time                      `bun:"deleted,soft_delete"`
-	CreatedBy       uuid.UUID                       `bun:"created_by,type:uuid,notnull"`
+	ID              uuid.UUID                          `bun:"id,type:uuid,unique,pk"`
+	Name            string                             `bun:"name,notnull"`
+	Description     *string                            `bun:"description"`
+	ServiceType     string                             `bun:"service_type,notnull"`
+	SiteID          uuid.UUID                          `bun:"site_id,type:uuid,notnull,pk"`
+	Site            *Site                              `bun:"rel:belongs-to,join:site_id=id"`
+	TenantID        uuid.UUID                          `bun:"tenant_id,type:uuid,notnull"`
+	Tenant          *Tenant                            `bun:"rel:belongs-to,join:tenant_id=id"`
+	Version         *string                            `bun:"version"`
+	VersionInfo     *DpuExtensionServiceVersionInfo    `bun:"version_info,type:jsonb"`
+	ActiveVersions  []string                           `bun:"active_versions,type:text[],default:'{}'"`
+	Status          string                             `bun:"status,notnull"`
+	LifecycleState  *DpuExtensionServiceLifecycleState `bun:"lifecycle_state"`
+	VersionCounter  *int32                             `bun:"version_ctr"`
+	IsMissingOnSite bool                               `bun:"is_missing_on_site,notnull,default:false"`
+	Created         time.Time                          `bun:"created,nullzero,notnull,default:current_timestamp"`
+	Updated         time.Time                          `bun:"updated,nullzero,notnull,default:current_timestamp"`
+	Deleted         *time.Time                         `bun:"deleted,soft_delete"`
+	CreatedBy       uuid.UUID                          `bun:"created_by,type:uuid,notnull"`
 }
 
 // ToDeletionRequestProto builds the workflow request that asks a Site to
@@ -235,6 +310,8 @@ type DpuExtensionServiceUpdateInput struct {
 	VersionInfo           *DpuExtensionServiceVersionInfo
 	ActiveVersions        []string
 	Status                *string
+	LifecycleState        *DpuExtensionServiceLifecycleState
+	VersionCounter        *int32
 	IsMissingOnSite       *bool
 }
 
@@ -510,6 +587,16 @@ func (dessd DpuExtensionServiceSQLDAO) Update(ctx context.Context, tx *db.Tx, in
 		}
 	}
 
+	if input.LifecycleState != nil {
+		des.LifecycleState = input.LifecycleState
+		updatedFields = append(updatedFields, "lifecycle_state")
+	}
+
+	if input.VersionCounter != nil {
+		des.VersionCounter = input.VersionCounter
+		updatedFields = append(updatedFields, "version_ctr")
+	}
+
 	if input.IsMissingOnSite != nil {
 		des.IsMissingOnSite = *input.IsMissingOnSite
 		updatedFields = append(updatedFields, "is_missing_on_site")
@@ -522,7 +609,34 @@ func (dessd DpuExtensionServiceSQLDAO) Update(ctx context.Context, tx *db.Tx, in
 	if len(updatedFields) > 0 {
 		updatedFields = append(updatedFields, "updated")
 
-		_, err := db.GetIDB(tx, dessd.dbSession).NewUpdate().Model(des).Column(updatedFields...).Where("id = ?", input.DpuExtensionServiceID).Exec(ctx)
+		query := db.GetIDB(tx, dessd.dbSession).NewUpdate().Model(des).Column(updatedFields...).Where("id = ?", input.DpuExtensionServiceID)
+		if input.VersionCounter != nil {
+			query = query.Where("(version_ctr IS NULL OR version_ctr <= ?)", *input.VersionCounter)
+			if input.LifecycleState != nil {
+				var newerStates []DpuExtensionServiceLifecycleState
+				switch *input.LifecycleState {
+				case DpuExtensionServiceLifecycleStateCreating, DpuExtensionServiceLifecycleStateUpdating:
+					newerStates = []DpuExtensionServiceLifecycleState{
+						DpuExtensionServiceLifecycleStateReady,
+						DpuExtensionServiceLifecycleStateFailed,
+						DpuExtensionServiceLifecycleStateDeleting,
+						DpuExtensionServiceLifecycleStateDeleted,
+					}
+				case DpuExtensionServiceLifecycleStateReady, DpuExtensionServiceLifecycleStateFailed:
+					newerStates = []DpuExtensionServiceLifecycleState{
+						DpuExtensionServiceLifecycleStateDeleting,
+						DpuExtensionServiceLifecycleStateDeleted,
+					}
+				case DpuExtensionServiceLifecycleStateDeleting:
+					newerStates = []DpuExtensionServiceLifecycleState{DpuExtensionServiceLifecycleStateDeleted}
+				}
+				if len(newerStates) > 0 {
+					query = query.Where("(version_ctr < ? OR lifecycle_state IS NULL OR lifecycle_state NOT IN (?))", *input.VersionCounter, bun.In(newerStates))
+				}
+			}
+		}
+
+		_, err := query.Exec(ctx)
 		if err != nil {
 			return nil, err
 		}

@@ -27,6 +27,7 @@ const (
 	DPUEXTENSIONSERVICESTATUS_READY    DpuExtensionServiceStatus = "Ready"
 	DPUEXTENSIONSERVICESTATUS_ERROR    DpuExtensionServiceStatus = "Error"
 	DPUEXTENSIONSERVICESTATUS_DELETING DpuExtensionServiceStatus = "Deleting"
+	DPUEXTENSIONSERVICESTATUS_DELETED  DpuExtensionServiceStatus = "Deleted"
 )
 
 // All allowed values of DpuExtensionServiceStatus enum
@@ -35,6 +36,7 @@ var AllowedDpuExtensionServiceStatusEnumValues = []DpuExtensionServiceStatus{
 	"Ready",
 	"Error",
 	"Deleting",
+	"Deleted",
 }
 
 func (v *DpuExtensionServiceStatus) UnmarshalJSON(src []byte) error {

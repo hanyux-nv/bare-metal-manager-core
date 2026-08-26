@@ -185,11 +185,33 @@ func (mde ManageDpuExtensionService) UpdateDpuExtensionServicesInDB(ctx context.
 			activeVersions = controllerDpuExtensionService.ActiveVersions
 		}
 
+		var lifecycleState *cdbm.DpuExtensionServiceLifecycleState
+		var versionCounter *int32
+		var coreState cdbm.DpuExtensionServiceLifecycleState
+		coreState.FromProto(controllerDpuExtensionService.LifecycleStatus)
+		if coreState != "" {
+			if dpuExtensionService.LifecycleState == nil || *dpuExtensionService.LifecycleState != coreState {
+				lifecycleState = &coreState
+			}
+			// Core's lifecycle state supersedes the presence-based status above.
+			status = nil
+			statusMessage = nil
+			if coreState.Status() != dpuExtensionService.Status {
+				status = cutil.GetPtr(coreState.Status())
+				statusMessage = cutil.GetPtr(fmt.Sprintf("Core reports DPF Helm chart service in %s state", coreState))
+			}
+			if dpuExtensionService.VersionCounter == nil || *dpuExtensionService.VersionCounter != controllerDpuExtensionService.VersionCtr {
+				versionCounter = &controllerDpuExtensionService.VersionCtr
+			}
+		}
+
 		needsUpdate := status != nil ||
 			isMissingOnSite != nil ||
 			version != nil ||
 			versionInfo != nil ||
-			activeVersions != nil
+			activeVersions != nil ||
+			lifecycleState != nil ||
+			versionCounter != nil
 
 		if needsUpdate {
 			_, err := dpuExtensionServiceDAO.Update(ctx, nil, cdbm.DpuExtensionServiceUpdateInput{
@@ -198,6 +220,8 @@ func (mde ManageDpuExtensionService) UpdateDpuExtensionServicesInDB(ctx context.
 				VersionInfo:           versionInfo,
 				ActiveVersions:        activeVersions,
 				Status:                status,
+				LifecycleState:        lifecycleState,
+				VersionCounter:        versionCounter,
 				IsMissingOnSite:       isMissingOnSite,
 			})
 			if err != nil {
@@ -237,8 +261,8 @@ func (mde ManageDpuExtensionService) UpdateDpuExtensionServicesInDB(ctx context.
 			continue
 		}
 
-		// If the DPU Extension Service was already being deleted, we can proceed with removing it from the DB
-		if dpuExtensionService.Status == cdbm.DpuExtensionServiceStatusDeleting {
+		// If the DPU Extension Service was already deleting or deleted, we can proceed with removing it from the DB
+		if dpuExtensionService.Status == cdbm.DpuExtensionServiceStatusDeleting || dpuExtensionService.Status == cdbm.DpuExtensionServiceStatusDeleted {
 			// The DPU Extension Service was being deleted, so delete it from DB
 			err := dpuExtensionServiceDAO.Delete(ctx, nil, dpuExtensionService.ID)
 			if err != nil {

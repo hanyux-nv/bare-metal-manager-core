@@ -34,6 +34,8 @@ import (
 	corev1 "github.com/NVIDIA/infra-controller/rest-api/proto/core/gen/v1"
 )
 
+const validDpfHelmChartDataForHandlerTest = `{"repoURL":"oci://registry.example.com/charts","chartName":"firewall","chartVersion":"1.2.3","security.privileged":false}`
+
 // TestCreateDpuExtensionServiceHandler_Handle tests the Create DPU Extension Service handler
 func TestCreateDpuExtensionServiceHandler_Handle(t *testing.T) {
 	ctx := context.Background()
@@ -110,9 +112,33 @@ func TestCreateDpuExtensionServiceHandler_Handle(t *testing.T) {
 	mockWorkflowRun.On("Get", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		arg := args.Get(1)
 		if ptr, ok := arg.(**corev1.DpuExtensionService); ok {
+			serviceName := "test-service"
+			description := "Test Description"
+			serviceType := corev1.DpuExtensionServiceType_KUBERNETES_POD
+			responseVersionInfo := versionInfo
+			var lifecycleStatus *corev1.LifecycleStatus
+			if capturedCreateRequest != nil {
+				serviceName = capturedCreateRequest.ServiceName
+				if capturedCreateRequest.Description != nil {
+					description = *capturedCreateRequest.Description
+				}
+				serviceType = capturedCreateRequest.ServiceType
+				if serviceType == corev1.DpuExtensionServiceType_DPF_HELM_CHART {
+					responseVersionInfo = &corev1.DpuExtensionServiceVersionInfo{
+						Version: version,
+						Data:    capturedCreateRequest.Data,
+						Created: createdTime.Format(cdbm.DpuExtensionServiceTimeFormat),
+					}
+					lifecycleStatus = &corev1.LifecycleStatus{State: `{"state":"creating"}`}
+				}
+			}
 			*ptr = &corev1.DpuExtensionService{
-				LatestVersionInfo: versionInfo,
+				ServiceName:       serviceName,
+				Description:       description,
+				ServiceType:       serviceType,
+				LatestVersionInfo: responseVersionInfo,
 				ActiveVersions:    []string{version},
+				LifecycleStatus:   lifecycleStatus,
 			}
 		}
 	}).Return(nil)
@@ -133,7 +159,7 @@ func TestCreateDpuExtensionServiceHandler_Handle(t *testing.T) {
 		Description: cutil.GetPtr("Test Description"),
 		ServiceType: model.DpuExtensionServiceTypeKubernetesPod,
 		SiteID:      st1.ID.String(),
-		Data:        "apiVersion: v1\nkind: Pod",
+		Data:        "apiVersion: v1\nkind: Pod\nmetadata:\n  name: test\nspec:\n  containers:\n  - name: test\n    image: test:latest",
 		Credentials: &model.APIDpuExtensionServiceCredentials{
 			RegistryURL: "https://registry.example.com",
 			Username:    cutil.GetPtr("testuser"),
@@ -142,6 +168,14 @@ func TestCreateDpuExtensionServiceHandler_Handle(t *testing.T) {
 		Observability: expectedObservability,
 	}
 	okBodyBytes, _ := json.Marshal(okBody)
+	dpfBody := model.APIDpuExtensionServiceCreateRequest{
+		Name:        "test-dpf-service",
+		Description: cutil.GetPtr("Test DPF Description"),
+		ServiceType: model.DpuExtensionServiceTypeDpfHelmChart,
+		SiteID:      st1.ID.String(),
+		Data:        validDpfHelmChartDataForHandlerTest,
+	}
+	dpfBodyBytes, _ := json.Marshal(dpfBody)
 
 	nameClashBody := okBody
 	nameClashBody.Name = "existing-service"
@@ -217,6 +251,14 @@ func TestCreateDpuExtensionServiceHandler_Handle(t *testing.T) {
 			expectedErr:    false,
 			expectedStatus: http.StatusCreated,
 		},
+		{
+			name:           "success creating DPF Helm chart DPU Extension Service",
+			reqOrgName:     tnOrg,
+			reqBody:        string(dpfBodyBytes),
+			user:           tnu1,
+			expectedErr:    false,
+			expectedStatus: http.StatusCreated,
+		},
 	}
 
 	for _, tt := range tests {
@@ -252,15 +294,26 @@ func TestCreateDpuExtensionServiceHandler_Handle(t *testing.T) {
 				var apiDES model.APIDpuExtensionService
 				err := json.Unmarshal(rec.Body.Bytes(), &apiDES)
 				require.NoError(t, err)
-				assert.Equal(t, okBody.Name, apiDES.Name)
-				assert.Equal(t, okBody.ServiceType, apiDES.ServiceType)
-				assert.Equal(t, okBody.SiteID, apiDES.SiteID)
+				expectedBody := okBody
+				if strings.Contains(tt.name, "DPF Helm chart") {
+					expectedBody = dpfBody
+					require.NotNil(t, apiDES.LifecycleState)
+					assert.Equal(t, cdbm.DpuExtensionServiceLifecycleStateCreating, *apiDES.LifecycleState)
+				}
+				assert.Equal(t, expectedBody.Name, apiDES.Name)
+				assert.Equal(t, expectedBody.ServiceType, apiDES.ServiceType)
+				assert.Equal(t, expectedBody.SiteID, apiDES.SiteID)
 				assert.Equal(t, version, *apiDES.Version)
 				assert.Equal(t, []string{version}, apiDES.ActiveVersions)
 				assert.Equal(t, createdTime, apiDES.VersionInfo.Created)
 				require.NotNil(t, capturedCreateRequest)
-				assert.Equal(t, okBody.Name, capturedCreateRequest.ServiceName)
-				assert.Equal(t, okBody.Data, capturedCreateRequest.Data)
+				assert.Equal(t, expectedBody.Name, capturedCreateRequest.ServiceName)
+				assert.Equal(t, expectedBody.Data, capturedCreateRequest.Data)
+				if expectedBody.ServiceType == model.DpuExtensionServiceTypeDpfHelmChart {
+					assert.Nil(t, capturedCreateRequest.Credential)
+					assert.Nil(t, capturedCreateRequest.Observability)
+					return
+				}
 				require.NotNil(t, capturedCreateRequest.Credential)
 				assert.Equal(t, okBody.Credentials.RegistryURL, capturedCreateRequest.Credential.RegistryUrl)
 				require.NotNil(t, capturedCreateRequest.Observability)
@@ -639,7 +692,8 @@ func TestUpdateDpuExtensionServiceHandler_Handle(t *testing.T) {
 	assert.NotNil(t, des1)
 	des2 := common.TestBuildDpuExtensionService(t, dbSession, "service-2", model.DpuExtensionServiceTypeKubernetesPod, tn1, st1, "V1-T1761856992374052", cdbm.DpuExtensionServiceStatusReady, tnu1)
 	assert.NotNil(t, des2)
-
+	desDpf := common.TestBuildDpuExtensionService(t, dbSession, "service-dpf", model.DpuExtensionServiceTypeDpfHelmChart, tn1, st1, "V1-T1761856992374052", cdbm.DpuExtensionServiceStatusReady, tnu1)
+	assert.NotNil(t, desDpf)
 	cfg := common.GetTestConfig()
 
 	// OTEL Spanner configuration
@@ -674,7 +728,18 @@ func TestUpdateDpuExtensionServiceHandler_Handle(t *testing.T) {
 	mockWorkflowRun.On("Get", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		arg := args.Get(1)
 		if ptr, ok := arg.(**corev1.DpuExtensionService); ok {
+			serviceName := "service-1"
+			description := "Updated Description"
+			if capturedUpdateRequest != nil && capturedUpdateRequest.ServiceName != nil {
+				serviceName = *capturedUpdateRequest.ServiceName
+			}
+			if capturedUpdateRequest != nil && capturedUpdateRequest.Description != nil {
+				description = *capturedUpdateRequest.Description
+			}
 			*ptr = &corev1.DpuExtensionService{
+				ServiceName:       serviceName,
+				Description:       description,
+				ServiceType:       corev1.DpuExtensionServiceType_KUBERNETES_POD,
 				LatestVersionInfo: versionInfo,
 				ActiveVersions:    []string{version},
 			}
@@ -708,7 +773,7 @@ func TestUpdateDpuExtensionServiceHandler_Handle(t *testing.T) {
 	okBody2 := model.APIDpuExtensionServiceUpdateRequest{
 		Name:        cutil.GetPtr("updated-service-name-2"),
 		Description: cutil.GetPtr("Updated Description"),
-		Data:        cutil.GetPtr("apiVersion: v1\nkind: Pod\nmetadata:\n  name: updated-service"),
+		Data:        cutil.GetPtr("apiVersion: v1\nkind: Pod\nmetadata:\n  name: updated-service\nspec:\n  containers:\n  - name: test\n    image: test:latest"),
 		Credentials: &model.APIDpuExtensionServiceCredentials{
 			RegistryURL: "https://registry.hub.docker.com",
 			Username:    cutil.GetPtr("testuser"),
@@ -768,6 +833,24 @@ func TestUpdateDpuExtensionServiceHandler_Handle(t *testing.T) {
 			reqOrgName:            tnOrg,
 			dpuExtensionServiceID: des1.ID.String(),
 			reqBody:               string(invalidBodyBytes),
+			user:                  tnu1,
+			expectedErr:           true,
+			expectedStatus:        http.StatusBadRequest,
+		},
+		{
+			name:                  "error when Kubernetes Pod data is not a Pod specification",
+			reqOrgName:            tnOrg,
+			dpuExtensionServiceID: des1.ID.String(),
+			reqBody:               `{"data": "kind: Deployment"}`,
+			user:                  tnu1,
+			expectedErr:           true,
+			expectedStatus:        http.StatusBadRequest,
+		},
+		{
+			name:                  "error when DPF Helm chart data is not a chart definition",
+			reqOrgName:            tnOrg,
+			dpuExtensionServiceID: desDpf.ID.String(),
+			reqBody:               `{"data": "kind: Pod"}`,
 			user:                  tnu1,
 			expectedErr:           true,
 			expectedStatus:        http.StatusBadRequest,
@@ -924,6 +1007,14 @@ func TestDeleteDpuExtensionServiceHandler_Handle(t *testing.T) {
 	assert.NotNil(t, des1)
 	des2 := common.TestBuildDpuExtensionService(t, dbSession, "service-2", model.DpuExtensionServiceTypeKubernetesPod, tn1, st1, "V1-T1761856992374052", cdbm.DpuExtensionServiceStatusReady, tnu1)
 	assert.NotNil(t, des2)
+	desDpf := common.TestBuildDpuExtensionService(t, dbSession, "service-dpf", model.DpuExtensionServiceTypeDpfHelmChart, tn1, st1, "V1-T1761856992374052", cdbm.DpuExtensionServiceStatusReady, tnu1)
+	assert.NotNil(t, desDpf)
+	readyLifecycle := cdbm.DpuExtensionServiceLifecycleStateReady
+	_, err := cdbm.NewDpuExtensionServiceDAO(dbSession).Update(ctx, nil, cdbm.DpuExtensionServiceUpdateInput{
+		DpuExtensionServiceID: desDpf.ID,
+		LifecycleState:        &readyLifecycle,
+	})
+	require.NoError(t, err)
 
 	al1 := common.TestBuildAllocation(t, dbSession, st1, tn1, "test-allocation-1", ipu)
 	it1 := common.TestBuildInstanceType(t, dbSession, "test-instance-type-1", nil, st1, map[string]string{
@@ -1017,6 +1108,14 @@ func TestDeleteDpuExtensionServiceHandler_Handle(t *testing.T) {
 			expectedErr:           false,
 			expectedStatus:        http.StatusNoContent,
 		},
+		{
+			name:                  "success accepting DPF Helm chart deletion",
+			reqOrgName:            tnOrg,
+			dpuExtensionServiceID: desDpf.ID.String(),
+			user:                  tnu1,
+			expectedErr:           false,
+			expectedStatus:        http.StatusAccepted,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1054,6 +1153,14 @@ func TestDeleteDpuExtensionServiceHandler_Handle(t *testing.T) {
 				_, err = desDAO.GetByID(context.Background(), nil, uuid.MustParse(tt.dpuExtensionServiceID), nil)
 				require.Error(t, err)
 				assert.ErrorIs(t, err, cdb.ErrDoesNotExist)
+			}
+			if !tt.expectedErr && rec.Code == http.StatusAccepted {
+				assert.Empty(t, rec.Body.Bytes())
+				desDAO := cdbm.NewDpuExtensionServiceDAO(dbSession)
+				stored, getErr := desDAO.GetByID(context.Background(), nil, uuid.MustParse(tt.dpuExtensionServiceID), nil)
+				require.NoError(t, getErr)
+				require.NotNil(t, stored.LifecycleState)
+				assert.Equal(t, cdbm.DpuExtensionServiceLifecycleStateDeleting, *stored.LifecycleState)
 			}
 		})
 	}

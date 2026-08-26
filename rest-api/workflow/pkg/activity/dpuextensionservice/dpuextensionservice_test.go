@@ -151,6 +151,7 @@ func TestManageDpuExtensionService_UpdateDpuExtensionServicesInDB(t *testing.T) 
 		HasCredentials: false,
 		Created:        time.Now().UTC().Round(time.Microsecond),
 	}, []string{version1}, cdbm.DpuExtensionServiceStatusReady, user)
+	dpuExtensionService8 := util.TestBuildDpuExtensionService(t, dbSession, "test-dpu-extension-service-8", st, tenant, cdbm.DpuExtensionServiceServiceTypeDpfHelmChart, nil, nil, []string{}, cdbm.DpuExtensionServiceStatusDeleted, user)
 
 	// Build DPU Extension Services for paged testing
 	pagedDpuExtensionServices := []*cdbm.DpuExtensionService{}
@@ -303,7 +304,7 @@ func TestManageDpuExtensionService_UpdateDpuExtensionServicesInDB(t *testing.T) 
 				},
 			},
 			updatedDpuExtensionServices: []*cdbm.DpuExtensionService{dpuExtensionService1, dpuExtensionService2, dpuExtensionService3, dpuExtensionService4},
-			deletedDpuExtensionServices: []*cdbm.DpuExtensionService{dpuExtensionService5},
+			deletedDpuExtensionServices: []*cdbm.DpuExtensionService{dpuExtensionService5, dpuExtensionService8},
 			wantErr:                     false,
 		},
 		{
@@ -453,7 +454,7 @@ func TestManageDpuExtensionService_UpdateDpuExtensionServicesInDB(t *testing.T) 
 	assert.NoError(t, err)
 
 	// Set updated timestamp to be older than the stale inventory threshold so it can be deleted
-	_, err = dbSession.DB.Exec("UPDATE dpu_extension_service SET updated = ? WHERE id = ?", time.Now().Add(-time.Duration(cwutil.InventoryReceiptInterval)*2), dpuExtensionService5.ID.String())
+	_, err = dbSession.DB.Exec("UPDATE dpu_extension_service SET updated = ? WHERE id IN (?, ?)", time.Now().Add(-time.Duration(cwutil.InventoryReceiptInterval)*2), dpuExtensionService5.ID.String(), dpuExtensionService8.ID.String())
 	assert.NoError(t, err)
 
 	for _, tt := range tests {

@@ -26,12 +26,14 @@ type DpuExtensionServiceUpdateRequest struct {
 	Name NullableString `json:"name,omitempty"`
 	// Optional description for the DPU Extension Service
 	Description NullableString `json:"description,omitempty"`
-	// Deployment spec for the DPU Extension Service
+	// Deployment spec for the DPU Extension Service, limited to 131072 UTF-8 bytes. For KubernetesPod this is the same Pod manifest accepted on create. For DpfHelmChart this is the same strict JSON definition accepted on create and updates stable V1 in place.
 	Data NullableString `json:"data,omitempty"`
-	// Credentials to download resources specified in DPU Extension Service data
+	// Credentials to download resources specified in DPU Extension Service data; unsupported for DpfHelmChart
 	Credentials *DpuExtensionServiceCredentials `json:"credentials,omitempty"`
-	// Observability configuration for the DPU Extension Service version
+	// Observability configuration for the DPU Extension Service version; unsupported for DpfHelmChart
 	Observability *DpuExtensionServiceObservability `json:"observability,omitempty"`
+	// Apply the update only when the service's current versionCounter equals this value, which returns 412 Precondition Failed on a mismatch. Supported for DpfHelmChart services, which are the only ones that report versionCounter.
+	IfVersionCounterMatch NullableInt32 `json:"ifVersionCounterMatch,omitempty"`
 }
 
 // NewDpuExtensionServiceUpdateRequest instantiates a new DpuExtensionServiceUpdateRequest object
@@ -244,6 +246,49 @@ func (o *DpuExtensionServiceUpdateRequest) SetObservability(v DpuExtensionServic
 	o.Observability = &v
 }
 
+// GetIfVersionCounterMatch returns the IfVersionCounterMatch field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *DpuExtensionServiceUpdateRequest) GetIfVersionCounterMatch() int32 {
+	if o == nil || IsNil(o.IfVersionCounterMatch.Get()) {
+		var ret int32
+		return ret
+	}
+	return *o.IfVersionCounterMatch.Get()
+}
+
+// GetIfVersionCounterMatchOk returns a tuple with the IfVersionCounterMatch field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *DpuExtensionServiceUpdateRequest) GetIfVersionCounterMatchOk() (*int32, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return o.IfVersionCounterMatch.Get(), o.IfVersionCounterMatch.IsSet()
+}
+
+// HasIfVersionCounterMatch returns a boolean if a field has been set.
+func (o *DpuExtensionServiceUpdateRequest) HasIfVersionCounterMatch() bool {
+	if o != nil && o.IfVersionCounterMatch.IsSet() {
+		return true
+	}
+
+	return false
+}
+
+// SetIfVersionCounterMatch gets a reference to the given NullableInt32 and assigns it to the IfVersionCounterMatch field.
+func (o *DpuExtensionServiceUpdateRequest) SetIfVersionCounterMatch(v int32) {
+	o.IfVersionCounterMatch.Set(&v)
+}
+
+// SetIfVersionCounterMatchNil sets the value for IfVersionCounterMatch to be an explicit nil
+func (o *DpuExtensionServiceUpdateRequest) SetIfVersionCounterMatchNil() {
+	o.IfVersionCounterMatch.Set(nil)
+}
+
+// UnsetIfVersionCounterMatch ensures that no value is present for IfVersionCounterMatch, not even an explicit nil
+func (o *DpuExtensionServiceUpdateRequest) UnsetIfVersionCounterMatch() {
+	o.IfVersionCounterMatch.Unset()
+}
+
 func (o DpuExtensionServiceUpdateRequest) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -268,6 +313,9 @@ func (o DpuExtensionServiceUpdateRequest) ToMap() (map[string]interface{}, error
 	}
 	if !IsNil(o.Observability) {
 		toSerialize["observability"] = o.Observability
+	}
+	if o.IfVersionCounterMatch.IsSet() {
+		toSerialize["ifVersionCounterMatch"] = o.IfVersionCounterMatch.Get()
 	}
 	return toSerialize, nil
 }
