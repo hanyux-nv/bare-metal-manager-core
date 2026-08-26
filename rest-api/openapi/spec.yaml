@@ -14115,6 +14115,8 @@ paths:
           $ref: '#/components/responses/ForbiddenError'
         '404':
           $ref: '#/components/responses/NotFoundError'
+        '412':
+          $ref: '#/components/responses/GenericHttpError'
       description: |-
         Update a specific DPU Extension Service.
 
@@ -28062,6 +28064,7 @@ components:
             - V1-T1761856992374052
           status: Ready
           lifecycleState: null
+          versionCounter: null
           statusHistory:
             - status: Pending
               message: DPU Service Extension is ready for use
@@ -28122,6 +28125,13 @@ components:
             - $ref: '#/components/schemas/DpuExtensionServiceLifecycleState'
             - type: 'null'
           description: Exact Core reconciliation state for a DPF Helm chart service; null for Kubernetes Pod services
+        versionCounter:
+          type:
+            - integer
+            - 'null'
+          format: int32
+          minimum: 1
+          description: Core optimistic-concurrency revision for a DPF Helm chart service; null when unsupported
         statusHistory:
           type: array
           description: History of the DPU Extension Service statuses
@@ -28319,6 +28329,13 @@ components:
         observability:
           $ref: '#/components/schemas/DpuExtensionServiceObservability'
           description: Observability configuration for the DPU Extension Service version; unsupported for DpfHelmChart
+        ifVersionCounterMatch:
+          type:
+            - integer
+            - 'null'
+          format: int32
+          minimum: 1
+          description: Apply the update only when the service's current versionCounter equals this value, which returns 412 Precondition Failed on a mismatch. Supported for DpfHelmChart services, which are the only ones that report versionCounter.
     DpuExtensionServiceCredentials:
       title: DpuExtensionServiceCredentials
       type: object

@@ -867,15 +867,18 @@ func TestAPIDpuExtensionServiceUpdateRequest_ToProto(t *testing.T) {
 	t.Run("populated request maps fields through", func(t *testing.T) {
 		name := "svc-b"
 		data := "kind: Pod V2"
+		ifVersionCounterMatch := int32(3)
 		desur := APIDpuExtensionServiceUpdateRequest{
-			Name: &name,
-			Data: &data,
+			Name:                  &name,
+			Data:                  &data,
+			IfVersionCounterMatch: &ifVersionCounterMatch,
 		}
 		req := desur.ToProto("svc-id-2")
 		assert.NotNil(t, req)
 		assert.Equal(t, "svc-id-2", req.ServiceId)
 		assert.Equal(t, &name, req.ServiceName)
 		assert.Equal(t, "kind: Pod V2", req.Data)
+		assert.Equal(t, &ifVersionCounterMatch, req.IfVersionCtrMatch)
 		assert.Nil(t, req.Credential)
 		assert.Nil(t, req.Observability)
 	})
@@ -886,6 +889,7 @@ func TestAPIDpuExtensionServiceUpdateRequest_ToProto(t *testing.T) {
 		req := desur.ToProto("svc-id-4")
 		assert.NotNil(t, req)
 		assert.Equal(t, "", req.Data)
+		assert.Nil(t, req.IfVersionCtrMatch)
 		assert.Nil(t, req.Credential)
 		assert.Nil(t, req.Observability)
 	})

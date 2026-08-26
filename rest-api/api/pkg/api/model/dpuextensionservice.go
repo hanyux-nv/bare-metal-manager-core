@@ -162,6 +162,8 @@ type APIDpuExtensionServiceUpdateRequest struct {
 	Credentials *APIDpuExtensionServiceCredentials `json:"credentials"`
 	// Observability is the observability configuration for the DPU Extension Service version
 	Observability *APIDpuExtensionServiceObservability `json:"observability"`
+	// IfVersionCounterMatch applies the update only when Core's revision still matches.
+	IfVersionCounterMatch *int32 `json:"ifVersionCounterMatch"`
 }
 
 // Validate ensures that the values passed in request are acceptable
@@ -287,6 +289,9 @@ func (desur *APIDpuExtensionServiceUpdateRequest) ToProto(serviceID string) *cor
 	if desur.Data != nil {
 		req.Data = *desur.Data
 	}
+	if desur.IfVersionCounterMatch != nil {
+		req.IfVersionCtrMatch = desur.IfVersionCounterMatch
+	}
 	return req
 }
 
@@ -318,6 +323,8 @@ type APIDpuExtensionService struct {
 	Status string `json:"status"`
 	// LifecycleState is Core's exact DPF reconciliation state and is null for Kubernetes Pod.
 	LifecycleState *cdbm.DpuExtensionServiceLifecycleState `json:"lifecycleState"`
+	// VersionCounter is Core's optimistic-concurrency revision.
+	VersionCounter *int32 `json:"versionCounter"`
 	// StatusHistory is the status detail records for the DpuExtensionService over time
 	StatusHistory []APIStatusDetail `json:"statusHistory"`
 	// Created indicates the ISO datetime string for when the DpuExtensionService was created
@@ -339,6 +346,7 @@ func NewAPIDpuExtensionService(dbdes *cdbm.DpuExtensionService, dbdesds []cdbm.S
 		ActiveVersions: dbdes.ActiveVersions,
 		Status:         dbdes.Status,
 		LifecycleState: dbdes.LifecycleState,
+		VersionCounter: dbdes.VersionCounter,
 		StatusHistory:  []APIStatusDetail{},
 		Created:        dbdes.Created,
 		Updated:        dbdes.Updated,

@@ -312,6 +312,7 @@ func (cdesh CreateDpuExtensionServiceHandler) Handle(c echo.Context) error {
 			ActiveVersions:        activeVersions,
 			Status:                &status,
 			LifecycleState:        lifecycleState,
+			VersionCounter:        &controllerDpuExtensionService.VersionCtr,
 		})
 		if err != nil {
 			logger.Error().Err(err).Msg("error updating DPU Extension Service record in DB")
@@ -933,6 +934,7 @@ func (udesh UpdateDpuExtensionServiceHandler) Handle(c echo.Context) error {
 			ActiveVersions:        activeVersions,
 			Status:                &status,
 			LifecycleState:        lifecycleState,
+			VersionCounter:        &controllerDpuExtensionService.VersionCtr,
 		})
 
 		if err != nil {
@@ -1076,6 +1078,7 @@ func (ddesh DeleteDpuExtensionServiceHandler) Handle(c echo.Context) error {
 		}
 		if isDpfHelmChart {
 			updateInput.LifecycleState = cutil.GetPtr(cdbm.DpuExtensionServiceLifecycleStateDeleting)
+			updateInput.VersionCounter = dpuExtensionService.VersionCounter
 		}
 		_, derr := desDAO.Update(ctx, tx, updateInput)
 		if derr != nil {

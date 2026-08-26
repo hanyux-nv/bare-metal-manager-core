@@ -186,6 +186,7 @@ func (mde ManageDpuExtensionService) UpdateDpuExtensionServicesInDB(ctx context.
 		}
 
 		var lifecycleState *cdbm.DpuExtensionServiceLifecycleState
+		var versionCounter *int32
 		var coreState cdbm.DpuExtensionServiceLifecycleState
 		coreState.FromProto(controllerDpuExtensionService.LifecycleStatus)
 		if coreState != "" {
@@ -199,6 +200,9 @@ func (mde ManageDpuExtensionService) UpdateDpuExtensionServicesInDB(ctx context.
 				status = cutil.GetPtr(coreState.Status())
 				statusMessage = cutil.GetPtr(fmt.Sprintf("Core reports DPF Helm chart service in %s state", coreState))
 			}
+			if dpuExtensionService.VersionCounter == nil || *dpuExtensionService.VersionCounter != controllerDpuExtensionService.VersionCtr {
+				versionCounter = &controllerDpuExtensionService.VersionCtr
+			}
 		}
 
 		needsUpdate := status != nil ||
@@ -206,7 +210,8 @@ func (mde ManageDpuExtensionService) UpdateDpuExtensionServicesInDB(ctx context.
 			version != nil ||
 			versionInfo != nil ||
 			activeVersions != nil ||
-			lifecycleState != nil
+			lifecycleState != nil ||
+			versionCounter != nil
 
 		if needsUpdate {
 			_, err := dpuExtensionServiceDAO.Update(ctx, nil, cdbm.DpuExtensionServiceUpdateInput{
@@ -216,6 +221,7 @@ func (mde ManageDpuExtensionService) UpdateDpuExtensionServicesInDB(ctx context.
 				ActiveVersions:        activeVersions,
 				Status:                status,
 				LifecycleState:        lifecycleState,
+				VersionCounter:        versionCounter,
 				IsMissingOnSite:       isMissingOnSite,
 			})
 			if err != nil {
