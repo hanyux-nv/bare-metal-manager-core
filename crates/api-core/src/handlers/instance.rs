@@ -1377,7 +1377,7 @@ pub(crate) async fn update_instance_config(
 
     update_instance_extension_services_config(
         &mh_snapshot,
-        &instance,
+        initial_instance,
         &config.extension_services,
         &mut txn,
     )
