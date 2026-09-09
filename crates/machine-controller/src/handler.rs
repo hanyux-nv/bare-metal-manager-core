@@ -701,6 +701,33 @@ impl MachineStateHandler {
         Self::clear_host_reprovision(mh_snaphost, txn).await
     }
 
+    async fn transition_to_dpu_discovering(
+        &self,
+        state: &ManagedHostStateSnapshot,
+        ctx: &mut StateHandlerContext<'_, MachineStateHandlerContextObjects>,
+    ) -> Result<StateHandlerOutcome<ManagedHostState>, StateHandlerError> {
+        let dpu_ids = state.host_snapshot.associated_dpu_machine_ids();
+        let next_state = ManagedHostState::DpuDiscoveringState {
+            dpu_states: DpuDiscoveringStates {
+                states: dpu_ids
+                    .iter()
+                    .map(|id| (*id, DpuDiscoveringState::Initializing))
+                    .collect(),
+            },
+        };
+        let outcome = StateHandlerOutcome::transition(next_state);
+
+        if !dpf_based_dpu_provisioning_possible(state, self.dpu_handler.dpf_sdk.is_some(), false) {
+            return Ok(outcome);
+        }
+
+        // Commit the selected ingestion path with the first state that reports it.
+        let mut txn = ctx.services.db_pool.begin().await?;
+        db::machine::mark_machine_ingestion_done_with_dpf(&mut txn, &state.host_snapshot.id)
+            .await?;
+        Ok(outcome.with_txn(txn))
+    }
+
     async fn attempt_state_transition(
         &self,
         host_machine_id: &HostMachineId,
@@ -906,17 +933,7 @@ impl MachineStateHandler {
                             ));
                         }
 
-                        let dpu_ids = mh_snapshot.host_snapshot.associated_dpu_machine_ids();
-                        Ok(StateHandlerOutcome::transition(
-                            ManagedHostState::DpuDiscoveringState {
-                                dpu_states: DpuDiscoveringStates {
-                                    states: dpu_ids
-                                        .iter()
-                                        .map(|id| (*id, DpuDiscoveringState::Initializing))
-                                        .collect(),
-                                },
-                            },
-                        ))
+                        self.transition_to_dpu_discovering(mh_snapshot, ctx).await
                     }
                     ConfigureAstraState::WaitingForPowercycle => {
                         let basetime = mh_snapshot
@@ -957,17 +974,7 @@ impl MachineStateHandler {
                             )));
                         }
 
-                        let dpu_ids = mh_snapshot.host_snapshot.associated_dpu_machine_ids();
-                        Ok(StateHandlerOutcome::transition(
-                            ManagedHostState::DpuDiscoveringState {
-                                dpu_states: DpuDiscoveringStates {
-                                    states: dpu_ids
-                                        .iter()
-                                        .map(|id| (*id, DpuDiscoveringState::Initializing))
-                                        .collect(),
-                                },
-                            },
-                        ))
+                        self.transition_to_dpu_discovering(mh_snapshot, ctx).await
                     }
                 }
             }

@@ -521,6 +521,35 @@ impl<'a> MockExploredHost<'a> {
         }
 
         self.test_env
+            .run_machine_state_controller_iteration_until_state_condition(
+                &host_machine_id,
+                10,
+                |machine| {
+                    matches!(
+                        machine.current_state(),
+                        ManagedHostState::DpuDiscoveringState { dpu_states }
+                            if dpu_states.states.values().all(|state| {
+                                matches!(state, model::machine::DpuDiscoveringState::Initializing)
+                            })
+                    )
+                },
+            )
+            .await;
+
+        let host = db::machine::find_one(
+            txn.as_mut(),
+            &host_machine_id,
+            model::machine::machine_search_config::MachineSearchConfig::default(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(
+            host.config.dpf.used_for_ingestion,
+            "DPF ingestion must be reported from the first DPUDiscovering state"
+        );
+
+        self.test_env
             .run_machine_state_controller_iteration_until_state_matches(
                 &host_machine_id,
                 10 + (10 * self.dpu_machine_ids.len() as u32),
